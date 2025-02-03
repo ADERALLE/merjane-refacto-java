@@ -1,49 +1,56 @@
 package com.nimbleways.springboilerplate.services.implementations;
 
-import java.time.LocalDate;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
 import com.nimbleways.springboilerplate.entities.Product;
 import com.nimbleways.springboilerplate.repositories.ProductRepository;
 
+
+import com.nimbleways.springboilerplate.services.implementations.productStrategies.ExpirableProductStrategy;
+import com.nimbleways.springboilerplate.services.implementations.productStrategies.NormalProductStrategy;
+import com.nimbleways.springboilerplate.services.implementations.productStrategies.ProductProcessingStrategy;
+import com.nimbleways.springboilerplate.services.implementations.productStrategies.SeasonalProductStrategy;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.ArrayList;
+
 @Service
 public class ProductService {
+    private final List<ProductProcessingStrategy> strategies;
 
     @Autowired
-    ProductRepository pr;
+    private ProductRepository productRepository;
 
     @Autowired
-    NotificationService ns;
+    private NotificationService notificationService;
 
-    public void notifyDelay(int leadTime, Product p) {
+
+
+
+    public ProductService() {
+        this.strategies = new ArrayList<>();
+        this.strategies.add(new NormalProductStrategy());
+        this.strategies.add(new SeasonalProductStrategy());
+        this.strategies.add(new ExpirableProductStrategy());
+    }
+
+    public void processProduct(Product product) {
+        for (ProductProcessingStrategy strategy : strategies) {
+            if (strategy.canProcess(product)) {
+                strategy.processProduct(product, productRepository, notificationService);
+                return;
+            }
+        }
+        throw new IllegalArgumentException("No strategy found for product type: " + product.getType());
+    }
+    public void notifyDelay(Integer leadTime, Product p) {
         p.setLeadTime(leadTime);
-        pr.save(p);
-        ns.sendDelayNotification(leadTime, p.getName());
+        productRepository.save(p);
+        notificationService.sendDelayNotification(leadTime, p.getName());
     }
 
-    public void handleSeasonalProduct(Product p) {
-        if (LocalDate.now().plusDays(p.getLeadTime()).isAfter(p.getSeasonEndDate())) {
-            ns.sendOutOfStockNotification(p.getName());
-            p.setAvailable(0);
-            pr.save(p);
-        } else if (p.getSeasonStartDate().isAfter(LocalDate.now())) {
-            ns.sendOutOfStockNotification(p.getName());
-            pr.save(p);
-        } else {
-            notifyDelay(p.getLeadTime(), p);
-        }
-    }
-
-    public void handleExpiredProduct(Product p) {
-        if (p.getAvailable() > 0 && p.getExpiryDate().isAfter(LocalDate.now())) {
-            p.setAvailable(p.getAvailable() - 1);
-            pr.save(p);
-        } else {
-            ns.sendExpirationNotification(p.getName(), p.getExpiryDate());
-            p.setAvailable(0);
-            pr.save(p);
-        }
+    public boolean canProcess(Product product) {
+        return "SEASONAL".equals(product.getType());
     }
 }
